@@ -78,33 +78,16 @@ Use:
  */
 
 
-(void *) explicitSize8;
-(void *) explicitSize16;
-(void *) explicitSize32;
+void* start;
 
 
-struct free_linked_list {		//define the linked list that we need     
+// our auxiallary function 
 
-	struct node* first; 
-	struct node* last;
+int merge_blocks();
+int scan_list();
+void* get_next(void* current); // in the memory
+void* get_previous(void* current); // in the memory
 
-};
-
-struct node {		//define the nodes in our linked list
-
-	struct node* previous;
-	struct node* next;
-	previous = NULL;
-	next = NULL;	//initialized at NULL 
-
-	double addr;
-
-}
-
-typedef free_linked_list flinkl; //have an easier name to use
-
-
-struct flinkl free; // global variable
 
 /* 
  * mm_init - initialize the malloc package.
@@ -112,16 +95,6 @@ struct flinkl free; // global variable
 int mm_init(void)
 {
     // maybe initialize a global variable linked list ? maybe two for allocated and free ?
-
-	struct node * first;
-	struct node * last;
-
-	first->next = last;
-	last->previous = first;
-
-
-	free.first = first;
-	free.last = last;
 
 	return 0;
 }
