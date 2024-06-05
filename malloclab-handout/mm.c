@@ -84,9 +84,94 @@ void* start;
 // our auxiallary function 
 
 int merge_blocks();
-int scan_list();
-void* get_next(void* current); // in the memory
-void* get_previous(void* current); // in the memory
+
+void* find_smallest_fit(void* first, int size);
+void* get_next(void* current);
+void* get_previous(void* current);
+int get_size(void* current);
+int get_tag(void* current);
+void set_next(void* current, void* next);
+void set_previous(void* current, void* previous);
+void set_size(void* current, int size);
+void set_tag(void* current, int tag);
+
+
+void* find_smallest_fit(void* first, int size){
+	void* current = first;
+	void* best = NULL;
+	int i = 0;
+	fprintf(stderr, "Starting loop\n");
+	if (current == NULL){
+		return NULL;
+	}
+	while(get_next(&current) != NULL){
+		++i;
+		if (i == 10){
+			break;
+		}
+		if (get_size(&current) == size){							// If exact size
+			fprintf(stderr, "Found exact size\n");
+			return current;
+		} else if (get_size(&current) > size){						// If size ok
+			fprintf(stderr, "Found ok size\n");
+			if (best == NULL){										// Set best if Null
+				fprintf(stderr, "Initialized best\n");
+				best = current;
+			} else if (get_size(&best) > get_size(&current)){		// Update best if better
+				fprintf(stderr, "Updated best\n");
+				best = current;
+			}
+		}
+		fprintf(stderr, "Checking next\n");
+		current = get_next(&current);
+	}
+	return best;													// Return best fit
+}
+
+void* get_next(void* current){
+	int *header = (int *) current;
+	return header[1];
+}
+
+void* get_previous(void* current){
+	int *header = (int *) current;
+	return header[2];
+}
+
+int get_size(void* current){
+	int *header = (int *) current;
+	int size = (*header) >> 1;
+	return size;
+}
+
+int get_tag(void* current){
+	int *header = (int *) current;
+	int tag = (*header) & 1;
+	return tag;
+}
+
+void set_next(void* current, void* next){
+	int *header = (int *) current;
+	header[1]= next;
+}
+
+void set_previous(void* current, void* previous){
+	int *header = (int *) current;
+	header[2]= previous;
+}
+
+void set_size(void* current, int size){
+	int *header = (int *) current;
+	int tag = get_tag(&current);
+	*header = ((((*header) & 0) | size) << 1) | tag;
+}
+
+void set_tag(void* current, int tag){
+	int *header = (int *) current;
+	*header = (((*header) >> 1) << 1) | tag;
+}
+
+
 
 
 /* 
@@ -95,7 +180,7 @@ void* get_previous(void* current); // in the memory
 int mm_init(void)
 {
     // maybe initialize a global variable linked list ? maybe two for allocated and free ?
-
+	start = NULL;
 	return 0;
 }
 
@@ -109,38 +194,63 @@ void *mm_malloc(size_t size)
 	// Ignore requests if size = 0
 	if (size == 0){ return NULL;}
 
-
 	// adjust block size to stay aligned (maybe we need to increase block size to account for 
 	// boundary tag
 
 	int newsize = ALIGN(size + SIZE_T_SIZE);
-
-	(void *) firstelt; // list where we want to place block
-
 	// search spot in heap to fit new block
 	// Search appropriate free list for block of size m > n
-	if (newsize <= 8){ firstelt = explicitSize8; }
-	else if (newsize <= 16){ firstelt = explicitSize16; }
-	else if (newsize <= 32){ firstelt = explicitSize32; }
+	
+	fprintf(stderr, "Searching smallest...\n");
 
-	while (firstelt != NULL){
-		// Check if size is greater than newsize.
-		if (){
+	void* block = find_smallest_fit(start, newsize);
+	fprintf(stderr, "'...smallest found'\n");
 
-			unsigned char * allocated = ((unsigned char *)firstelt)+7; // last byte of the tag
-			*allocated = 1;
+	if (block == NULL){
+		fprintf(stderr, "No block found\n");
 
-			// Update boundary tag
-			// remove elt from linked list
-			return firstelt;
+		void *p = mem_sbrk(newsize);
+		set_previous(&p, NULL);
+		set_size(&p, newsize);
+		set_tag(&p, 1);
+
+		if (start == NULL){
+			start = p;
+			set_next(&p, NULL);
+			fprintf(stderr, "Set start\n");
+		} else {
+			set_next(&p, start);
+			set_previous(start, &p);
+			start = p;
+			fprintf(stderr, "Updated start\n");
 		}
-		// update firstelt to next element of linked list
+		fprintf(stderr, "Returning\n");
+		return p;
 	}
+	fprintf(stderr, "Block found\n");
+	set_previous(&block, NULL);
+	set_size(&block, newsize);
+	set_tag(&block, 1);
+	if (start == NULL){
+		fprintf(stderr, "Set start\n");
+		start = block;
+		set_next(&block, NULL);
+
+	} else {
+		set_next(&block, start);
+		set_previous(start, &block);
+		start = block;
+		fprintf(stderr, "Updated start\n");
+	}
+	fprintf(stderr, "Returning\n");
+	return block;
+	
 
 	// if spot not found, place the block at the end, allocating
 	// more memory to the heap if needed
 
 //  Below is the basic implementation given in template file
+/*
     int newsize = ALIGN(size + SIZE_T_SIZE);
     void *p = mem_sbrk(newsize);
     if (p == (void *)-1)
@@ -148,16 +258,25 @@ void *mm_malloc(size_t size)
     else {
         *(size_t *)p = size;
         return (void *)((char *)p + SIZE_T_SIZE);
-    }
+    }*/
 }
 
-/*
+/*explicit free
  * mm_free - Freeing a block does nothing.
  */
 void mm_free(void *ptr)
 {
-	//~check that the pointer really is one
+	if (ptr != NULL){
 
+		set_tag(&ptr, 0);
+		void* previous = get_previous(&ptr);
+		void* next = get_next(&ptr);
+
+		set_previous(&next, &previous);
+		set_next(&previous, &next);
+	}
+	//~check that the pointer really is one
+	/*
 	if (ptr != NULL){
 
 		double *tag = (double*)ptr; // this is to get the full tag
@@ -171,6 +290,7 @@ void mm_free(void *ptr)
 			// add to appropriate linked list
 		}
 	}
+	*/
 }
 
 /*
