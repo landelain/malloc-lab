@@ -130,12 +130,12 @@ void* find_smallest_fit(void* first, int size){
 
 void* get_next(void* current){
 	int *header = (int *) current;
-	return header[1];
+	return (void *) header[1];
 }
 
 void* get_previous(void* current){
 	int *header = (int *) current;
-	return header[2];
+	return (void *) header[2];
 }
 
 int get_size(void* current){
@@ -152,7 +152,7 @@ int get_tag(void* current){
 
 void set_next(void* current, void* next){
 	int *header = (int *) current;
-	header[1]= next;
+	header[1] =  (int *) next;
 }
 
 void set_previous(void* current, void* previous){
