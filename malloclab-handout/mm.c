@@ -100,6 +100,7 @@ void set_next(void* current, void* next);
 void set_previous(void* current, void* previous);
 void set_size(void* current, int size);
 void set_tag(void* current, int tag);
+void remove_link(void* ptr);
 
 
 void* find_smallest_fit(void* first, int size){
@@ -129,18 +130,6 @@ void* find_smallest_fit(void* first, int size){
 		current = get_next(current);
 	}
 	return best;													// Return best fit
-}
-
-int get_tag(void* current){
-
-	if (current == NULL){
-		fprintf(stderr, "Error : null pointer");
-		return -1;
-	}
-
-	int *header = (int *) current;
-	int tag = (*header) & 1;
-	return tag;
 }
 
 void* get_next(void* current){
@@ -194,6 +183,18 @@ int get_size(void* current){
 		fprintf(stderr, "Error : size not a multiple of 8");
 	}
 	return size;
+}
+
+int get_tag(void* current){
+
+	if (current == NULL){
+		fprintf(stderr, "Error : null pointer");
+		return -1;
+	}
+
+	int *header = (int *) current;
+	int tag = (*header) & 1;
+	return tag;
 }
 
 void set_next(void* current, void* next){
@@ -280,7 +281,27 @@ void set_tag(void* current, int tag){
 	//*header = (((*header) >> 1) << 1) | tag;
 }
 
+void remove_link(void* ptr){
 
+	if(ptr == NULL){
+		fprintf(stderr, "Error : null pointer");
+		return;
+	}
+
+	void * next = get_next(ptr);
+	void * previous = get_previous(ptr);
+
+	if(previous == NULL){
+		fprintf(stderr, "Error : pointer not in linked list");
+		return;
+	}
+
+	set_next(previous, next);
+
+	if(next != NULL){
+		set_previous(next, previous);
+	}
+}
 
 
 /* 
@@ -329,6 +350,7 @@ void *mm_malloc(size_t size)
 	}
 	else{
 		fprintf(stderr, "Block found\n");
+		remove_link(block);
 	}
 
 	set_size(block, newsize);
