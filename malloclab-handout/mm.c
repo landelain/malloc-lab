@@ -89,21 +89,23 @@ void* start;
 
 // our auxiallary functions
 
-int merge_blocks();
-
-void* find_smallest_fit(void* first, int size);
+void* find_smallest_fit(void* first, size_t size);
 void* get_next(void* current);
 void* get_previous(void* current);
-int get_size(void* current);
-int get_tag(void* current);
+size_t get_size(void* current);
+unsigned char get_tag(void* current);
 void set_next(void* current, void* next);
 void set_previous(void* current, void* previous);
-void set_size(void* current, int size);
+void set_size(void* current, size_t size);
 void set_tag(void* current, int tag);
+
 void remove_link(void* ptr);
+int merge_block(void* ptr);
+int create_block(void* ptr);
 
 
-void* find_smallest_fit(void* first, int size){
+
+void* find_smallest_fit(void* first, size_t size){
 	void* current = first;
 	void* best = NULL;
 	int i = 0;
@@ -144,11 +146,11 @@ void* get_next(void* current){
 		return NULL;
 	}
 
-	int *header = (int *) current;
-	if ((void *) header[1]){ // case were it doesnt have a next
+	unsigned char *header = (unsigned char *) current;
+	if (((void *) header[ALIGNMENT]) == NULL){ // case were it doesnt have a next
 		return NULL;
 	}
-	return (void *) header[1];
+	return (void *) header[ALIGNMENT];
 }
 
 void* get_previous(void* current){
@@ -163,37 +165,38 @@ void* get_previous(void* current){
 		return NULL;
 	}
 
-	int *header = (int *) current;
-	if ((void *) header[2]){ // case were it doesnt have a previous
+	unsigned char *header = (unsigned char *) current;
+	if (((void *) header[2*ALIGNMENT]) == NULL){ // case were it doesnt have a previous
 		return NULL;
 	}
-	return (void *) header[2];
+	return (void *) header[2*ALIGNMENT];
 }
 
-int get_size(void* current){
+size_t get_size(void* current){
 
 	if (current == NULL){
 		fprintf(stderr, "Error : null pointer");
-		return -1;
+		return 0;
 	}
 
-	int *header = (int *) current;
-	int size = (*header) & 0xfc; //mask 0b11111100 -> because alignement min is 4 so the last 2 bits are gonna be 0 
+	double* header = (double *) current;
+	double size_double = *header;
+	size_t size =  (size_t) (size_double & 0xfc); //mask 0b11111100 -> because alignement min is 4 so the last 2 bits are gonna be 0
 	if (! (size & 0x7)){	
 		fprintf(stderr, "Error : size not a multiple of 8");
 	}
 	return size;
 }
 
-int get_tag(void* current){
+unsigned char get_tag(void* current){
 
 	if (current == NULL){
 		fprintf(stderr, "Error : null pointer");
 		return -1;
 	}
 
-	int *header = (int *) current;
-	int tag = (*header) & 1;
+	unsigned char *header = (unsigned char *) current;
+	unsigned char tag = header[ALIGNMENT-1];
 	return tag;
 }
 
@@ -214,14 +217,9 @@ void set_next(void* current, void* next){
 		return;
 	}
 
-	int *header = (int *) current;
-
-	if (next == NULL){ // case were next is null
-		header[1] =  0; 
-		return;
-	}
-
-	header[1] = (int) next;
+	unsigned char *header = (unsigned char *) current;
+	double *place = (double *) header[ALIGNMENT];
+	*place = (double *)next;
 }
 
 void set_previous(void* current, void* previous){
@@ -240,7 +238,8 @@ void set_previous(void* current, void* previous){
 		fprintf(stderr, "Error : previous not free block");
 		return;
 	}
-	int *header = (int *) current;
+
+	unsigned char *header = (unsigned *) current;
 
 	if (previous == NULL){ // case were previous is null
 		header[2] =  0; 
@@ -250,7 +249,7 @@ void set_previous(void* current, void* previous){
 	header[2] = (int) previous; // intptr_t
 }
 
-void set_size(void* current, int size){
+void set_size(void* current, size_t size){
 
 	if (current == NULL){
 		fprintf(stderr, "Error : null pointer");
@@ -303,6 +302,58 @@ void remove_link(void* ptr){
 	}
 }
 
+int merge_block(void* ptr){
+
+	if(ptr == NULL){
+		fprintf(stderr, "Error : null pointer");
+		return 1;
+	}
+	if(!get_tag(ptr)){
+		fprintf(stderr, "Error : pointer not free");
+		return 1;
+	}
+
+	void* current = start;
+	void* pre = NULL;
+	void* post = NULL;
+	size_t size = get_size(ptr);
+
+	while(current != NULL){
+
+		size_t sizec = get_size(current);
+		if(current + sizec == ptr){
+			fprintf(stderr, "found pre");
+			pre = current;
+		}
+		if(ptr + size == current){
+			fprintf(stderr, "found post");
+			post = current;
+		}
+
+		current = get_next(current);
+	}
+
+	if(post != NULL){
+		size_t size_post = get_size(post);
+		set_size(ptr, size+size_post + 8);
+		remove_link(post);
+	}
+
+	if(pre != NULL){
+		size_t size_pre = get_size(pre);
+		set_size(pre, size+size_pre+8);
+		remove_link(ptr);
+	}
+
+
+	return 0;
+}
+
+int create_block(void* ptr){
+
+
+	return 0;
+}
 
 /* 
  * mm_init - initialize the malloc package.
@@ -327,7 +378,7 @@ void *mm_malloc(size_t size)
 	// adjust block size to stay aligned (maybe we need to increase block size to account for 
 	// boundary tag
 
-	size = size+16; // +16 for footer and header
+	size = size+ALIGNMENT; 
 	int newsize = ALIGN(size + SIZE_T_SIZE); 
 	// search spot in heap to fit new block
 	// Search appropriate free list for block of size m > n
@@ -396,6 +447,8 @@ void mm_free(void *ptr)
 	set_next(ptr, start);
 	set_previous(start, ptr);
 	start = ptr;
+
+	merge_block(ptr);
 	
 	
 	//~check that the pointer really is one
