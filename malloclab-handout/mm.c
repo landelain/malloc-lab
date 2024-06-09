@@ -146,7 +146,7 @@ void* get_next(void* current){
 	}
 
 	if(get_tag(current)){
-		fprintf(stderr, "Error get_next : not free block\n");
+		//fprintf(stderr, "Error get_next : not free block\n");
 		return NULL;
 	}
 
@@ -271,7 +271,8 @@ void set_size(void* current, size_t size){
 	}
 
 	unsigned char *header = (unsigned char *) current;
-	if ((size & 0x7)){	
+
+	if (size & 0x7){	
 		fprintf(stderr, "Error set_size : size not a multiple of 8\n");
 		return;
 	}
@@ -357,12 +358,15 @@ int merge_link(void* ptr){
 	if(post != NULL){
 		size_t size_post = get_size(post);
 		//fprintf(stderr, "Calling set size 1\n");
+	
 		set_size(ptr, size+size_post + 8);
+
 		remove_link(post);
 	}
 
 	if(pre != NULL){
 		size_t size_pre = get_size(pre);
+		size = get_size(ptr);
 		//fprintf(stderr, "Calling set size 2\n");
 
 		set_size(pre, size+size_pre+8);
@@ -443,7 +447,10 @@ void *mm_malloc(size_t size)
 		}
 		//fprintf(stderr, "Calling set size 4\n");
 
+		fprintf(stderr, "before %zu\n", newsize);
 		set_size(block, newsize);
+		size_t test = get_size(block);
+		fprintf(stderr, "after %zu\n\n", test);
 
 	}
 	else{
