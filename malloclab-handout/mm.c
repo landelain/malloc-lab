@@ -41,7 +41,8 @@ team_t team = {
 // big issue : we need to know if int are 8 or 4 bytes, or get a way around it by using unsigned char which are always 1 byte.
 
 /* rounds up to the nearest multiple of ALIGNMENT */
-#define ALIGN(size) (((size) + (ALIGNMENT-1)) & ~0x7)
+//#define ALIGN(size) (((size) + (ALIGNMENT-1)) & ~0x7)
+#define ALIGN(size) (((size) + (ALIGNMENT-1)) & ~(ALIGNMENT-1))
 
 
 #define SIZE_T_SIZE (ALIGN(sizeof(size_t)))
@@ -82,8 +83,10 @@ Use:
 	feels like were assuming that were going for an alignement of 8 which is fine by me but lets be aware of that 
  */
 
+// global variables
 
-void* start;
+static void* start;
+static int size4 = sizeof(size_t) == 4;
 
 
 
@@ -97,11 +100,11 @@ unsigned char get_tag(void* current);
 void set_next(void* current, void* next);
 void set_previous(void* current, void* previous);
 void set_size(void* current, size_t size);
-void set_tag(void* current, int tag);
+void set_tag(void* current, unsigned char tag);
 
 void remove_link(void* ptr);
-int merge_block(void* ptr);
-int create_block(void* ptr);
+int merge_link(void* ptr);
+int create_link(void* ptr, size_t size_new);
 
 
 
@@ -109,26 +112,27 @@ void* find_smallest_fit(void* first, size_t size){
 	void* current = first;
 	void* best = NULL;
 	int i = 0;
-	fprintf(stderr, "Starting loop\n");
+	//fprintf(stderr, "Starting loop\n");
 	while(current != NULL){
 		++i;
 		if (i == 10){ // ig that some sort of first instance checking counter ?
 			break;
 		}
 		if (get_size(current) == size){							// If exact size
-			fprintf(stderr, "Found exact size\n");
+			//fprintf(stderr, "Found exact size\n");
 			return current;
 		} else if (get_size(current) > size){						// If size ok
-			fprintf(stderr, "Found ok size\n");
+			//fprintf(stderr, "Found ok size\n");
 			if (best == NULL){										// Set best if Null
-				fprintf(stderr, "Initialized best\n");
+				//fprintf(stderr, "Initialized best\n");
 				best = current;
 			} else if (get_size(best) > get_size(current)){		// Update best if better
-				fprintf(stderr, "Updated best\n");
+				//fprintf(stderr, "Updated best\n");
 				best = current;
 			}
 		}
-		fprintf(stderr, "Checking next\n");
+		//fprintf(stderr, "Checking next\n");
+		//fprintf(stderr, "Calling get next 2\n");
 		current = get_next(current);
 	}
 	return best;													// Return best fit
@@ -137,53 +141,62 @@ void* find_smallest_fit(void* first, size_t size){
 void* get_next(void* current){
 
 	if (current == NULL){
-		fprintf(stderr, "Error : null pointer");
+		fprintf(stderr, "Error get_next : null pointer\n");
 		return NULL;
 	}
 
-	if(!get_tag(current)){
-		fprintf(stderr, "Error : not free block");
+	if(get_tag(current)){
+		fprintf(stderr, "Error get_next : not free block\n");
 		return NULL;
 	}
 
 	unsigned char *header = (unsigned char *) current;
-	if (((void *) header[ALIGNMENT]) == NULL){ // case were it doesnt have a next
+	if (((void *) (header + ALIGNMENT)) == NULL){ // case were it doesnt have a next
 		return NULL;
 	}
-	return (void *) header[ALIGNMENT];
+	return (void *) (header + ALIGNMENT);
 }
 
 void* get_previous(void* current){
 
 	if (current == NULL){
-		fprintf(stderr, "Error : null pointer");
+		fprintf(stderr, "Error get_previous : null pointer\n");
 		return NULL;
 	}
 
-	if(!get_tag(current)){
-		fprintf(stderr, "Error : not free block");
+	if(get_tag(current)){
+		fprintf(stderr, "Error get_previous : not free block\n");
 		return NULL;
 	}
 
 	unsigned char *header = (unsigned char *) current;
-	if (((void *) header[2*ALIGNMENT]) == NULL){ // case were it doesnt have a previous
+	if (((void *) (header + 2*ALIGNMENT)) == NULL){ // case were it doesnt have a previous
 		return NULL;
 	}
-	return (void *) header[2*ALIGNMENT];
+	return (void *) (header + 2*ALIGNMENT);
 }
 
 size_t get_size(void* current){
 
 	if (current == NULL){
-		fprintf(stderr, "Error : null pointer");
+		fprintf(stderr, "Error get_size : null pointer\n");
 		return 0;
 	}
 
-	double* header = (double *) current;
-	double size_double = *header;
-	size_t size =  (size_t) (size_double & 0xfc); //mask 0b11111100 -> because alignement min is 4 so the last 2 bits are gonna be 0
-	if (! (size & 0x7)){	
-		fprintf(stderr, "Error : size not a multiple of 8");
+	size_t * header = (size_t *) current;
+	size_t size = 0;
+	for (int i = 0; i < sizeof(size_t)-1; i++) {
+		// Shift the bytes and combine into size
+		size |= (size_t)header[i] << (sizeof(size_t) * i);
+	}
+	if(!size4){
+
+		size = size & (~(size_t)0xff);
+	}
+
+	if ( size & 0x7 ){	
+
+		fprintf(stderr, "Error get_size : size %zu not a multiple of 8\n", size);
 	}
 	return size;
 }
@@ -191,125 +204,132 @@ size_t get_size(void* current){
 unsigned char get_tag(void* current){
 
 	if (current == NULL){
-		fprintf(stderr, "Error : null pointer");
+		fprintf(stderr, "Error get_tag : null pointer\n");
 		return -1;
 	}
 
 	unsigned char *header = (unsigned char *) current;
 	unsigned char tag = header[ALIGNMENT-1];
-	return tag;
+	return tag & 1;
 }
 
 void set_next(void* current, void* next){
 
 	if (current == NULL){
-		fprintf(stderr, "Error : null pointer");
+		fprintf(stderr, "Error set_next : null pointer\n");
 		return;
 	}
 
-	if(!get_tag(current)){
-		fprintf(stderr, "Error : current not free block");
+	if(get_tag(current)){
+		fprintf(stderr, "Error set_next : current not free block\n");
 		return;
 	}
 
-	if(!get_tag(next)){
-		fprintf(stderr, "Error : next not free block");
+	if(get_tag(next)){
+		fprintf(stderr, "Error set_next : next not free block\n");
 		return;
 	}
 
 	unsigned char *header = (unsigned char *) current;
-	double *place = (double *) header[ALIGNMENT];
-	*place = (double *)next;
+	int **place = (int **) (header + ALIGNMENT);
+	*place =(int *) next;
 }
 
 void set_previous(void* current, void* previous){
 
 	if (current == NULL){
-		fprintf(stderr, "Error : null pointer");
+		fprintf(stderr, "Error set_previous : null pointer\n");
 		return;
 	}
 
-	if(!get_tag(current)){
-		fprintf(stderr, "Error : current not free block");
+	if(get_tag(current)){
+		fprintf(stderr, "Error set_previous : current not free block\n");
 		return;
 	}
 
-	if(!get_tag(previous)){
-		fprintf(stderr, "Error : previous not free block");
+	if(get_tag(previous)){
+		fprintf(stderr, "Error set_previous : previous not free block\n");
 		return;
 	}
-
-	unsigned char *header = (unsigned *) current;
-
-	if (previous == NULL){ // case were previous is null
-		header[2] =  0; 
-		return;
-	}
-	
-	header[2] = (int) previous; // intptr_t
+	unsigned char *header = (unsigned char *) current;
+	int *place = (int *) (header +2*ALIGNMENT);
+	int prev = (int) previous;
+	*place = prev;
 }
 
 void set_size(void* current, size_t size){
+	//fprintf(stderr, "Setting size to %zu\n", size);
 
 	if (current == NULL){
-		fprintf(stderr, "Error : null pointer");
+		fprintf(stderr, "Error set_size : null pointer\n");
 		return;
 	}
 
-	int *header = (int *) current;
-	int tag = get_tag(&current);
-	if (! (size & 0x7)){	
-		fprintf(stderr, "Error : size not a multiple of 8");
+	if( size == 0){
+		fprintf(stderr, "Error set_size : 0 size\n");
 		return;
 	}
-	header[0] = size | tag;
 
-	//*header = ((((*header) & 0) | size) << 1) | tag;
+	unsigned char *header = (unsigned char *) current;
+	if ((size & 0x7)){	
+		fprintf(stderr, "Error set_size : size not a multiple of 8\n");
+		return;
+	}
+
+	header[0] = size;
+	//size_t gsize = get_size(current);
+	//fprintf(stderr, "Setting size to %zu, should be %zu\n", header[0], size);
+
 }
 
-void set_tag(void* current, int tag){
+void set_tag(void* current, unsigned char tag){
 
 	if (current == NULL){
-		fprintf(stderr, "Error : null pointer");
+		fprintf(stderr, "Error set_tag : null pointer\n");
 		return;
 	}
 
-	int *header = (int *) current;
-	*header = (*header & 0xfc) | tag; //mask 0b11111100 -> because alignement min is 4 so the last 2 bits are gonna be 0 
+	unsigned char *header = (unsigned char *) current;
+	header[ALIGNMENT-1] = (header[ALIGNMENT-1] & (~1)) | tag;
 
-	//*header = (((*header) >> 1) << 1) | tag;
 }
 
 void remove_link(void* ptr){
 
 	if(ptr == NULL){
-		fprintf(stderr, "Error : null pointer");
+		fprintf(stderr, "Error remove_link : null pointer\n");
 		return;
 	}
 
-	void * next = get_next(ptr);
-	void * previous = get_previous(ptr);
-
-	if(previous == NULL){
-		fprintf(stderr, "Error : pointer not in linked list");
+	if(get_tag(ptr)){
+		fprintf(stderr, "Error remove_link : not free block\n");
 		return;
 	}
-
-	set_next(previous, next);
+	//fprintf(stderr, "Calling get next 3\n");
+	void *next = get_next(ptr);
+	void *previous = get_previous(ptr);
 
 	if(next != NULL){
 		set_previous(next, previous);
 	}
+	if(previous != NULL){
+		set_next(previous, next);
+	}
+
+	if(previous == NULL){
+		start = next;
+	}
+	set_tag(ptr, (unsigned char) 1);
 }
 
-int merge_block(void* ptr){
+int merge_link(void* ptr){
 
 	if(ptr == NULL){
-		fprintf(stderr, "Error : null pointer");
+		fprintf(stderr, "Error merge_link : null pointer\n");
 		return 1;
 	}
-	if(!get_tag(ptr)){
-		fprintf(stderr, "Error : pointer not free");
+	if(get_tag(ptr)){
+		fprintf(stderr, "Error merge_link : pointer not free\n");
 		return 1;
 	}
 
@@ -322,25 +342,29 @@ int merge_block(void* ptr){
 
 		size_t sizec = get_size(current);
 		if(current + sizec == ptr){
-			fprintf(stderr, "found pre");
+			//fprintf(stderr, "found pre");
 			pre = current;
 		}
 		if(ptr + size == current){
-			fprintf(stderr, "found post");
+			//fprintf(stderr, "found post");
 			post = current;
 		}
-
+		
+		//fprintf(stderr, "Calling get next 1, current tag: %d\n", get_tag(current));
 		current = get_next(current);
 	}
 
 	if(post != NULL){
 		size_t size_post = get_size(post);
+		//fprintf(stderr, "Calling set size 1\n");
 		set_size(ptr, size+size_post + 8);
 		remove_link(post);
 	}
 
 	if(pre != NULL){
 		size_t size_pre = get_size(pre);
+		//fprintf(stderr, "Calling set size 2\n");
+
 		set_size(pre, size+size_pre+8);
 		remove_link(ptr);
 	}
@@ -349,8 +373,30 @@ int merge_block(void* ptr){
 	return 0;
 }
 
-int create_block(void* ptr){
+int create_link(void* ptr, size_t size_new){
 
+	if(ptr == NULL){
+		fprintf(stderr, "Error create_link : null pointer\n");
+		return 1;
+	}
+	size_t size = get_size(ptr);
+	size_t size_link = size-size_new-8;
+
+	if(size_link < 16){
+		fprintf(stderr, "Error create_link : not enough size\n");
+		return 1; 
+	}
+
+	unsigned char * new_link_ptr = ( (unsigned char *) ptr ) + size_new;
+	void* link_ptr = (void*) new_link_ptr;
+	//fprintf(stderr, "Calling set size 3\n");
+
+	set_size(link_ptr, size_link);
+	set_tag(link_ptr, 0);
+
+	set_next(link_ptr, start);
+	set_previous(start, link_ptr);
+	start = link_ptr;
 
 	return 0;
 }
@@ -360,7 +406,6 @@ int create_block(void* ptr){
  */
 int mm_init(void)
 {
-    // maybe initialize a global variable linked list ? maybe two for allocated and free ?
 	start = NULL;
 	return 0;
 }
@@ -378,37 +423,51 @@ void *mm_malloc(size_t size)
 	// adjust block size to stay aligned (maybe we need to increase block size to account for 
 	// boundary tag
 
-	size = size+ALIGNMENT; 
-	int newsize = ALIGN(size + SIZE_T_SIZE); 
+	size = size+ALIGNMENT; // header
+	size_t newsize = ALIGN(size + SIZE_T_SIZE); 
 	// search spot in heap to fit new block
 	// Search appropriate free list for block of size m > n
-	
-	fprintf(stderr, "Searching smallest...\n");
+	//fprintf(stderr, "Searching smallest...\n");
 
 	void* block = find_smallest_fit(start, newsize);
-	fprintf(stderr, "'...smallest found'\n");
+	//fprintf(stderr, "'...smallest found'\n");
 
 	if (block == NULL){
 
-		fprintf(stderr, "No block found\n");
+		//fprintf(stderr, "No block found\n");
 		block = mem_sbrk(newsize);
 
 		if(block == (void*) -1){
-			fprintf(stderr, "Error : sbrk allocation failed\n");
+			fprintf(stderr, "Error mm_malloc : sbrk allocation failed\n");
 			return NULL;
 		}
+		//fprintf(stderr, "Calling set size 4\n");
+
+		set_size(block, newsize);
 
 	}
 	else{
-		fprintf(stderr, "Block found\n");
-		remove_link(block);
-	}
+		//fprintf(stderr, "Block found\n");
 
-	set_size(block, newsize);
+		size_t size_old = get_size(block);
+		if (size_old - newsize < 24){
+			remove_link(block);
+		}
+		else{
+			//create_link(block, newsize);
+			remove_link(block);
+		}
+	
+	}
+	//fprintf(stderr, "Size: %d, new_size: %d\n", size, newsize);
 	set_tag(block, 1);
 	
-	fprintf(stderr, "Returning\n");
-	return block;
+	//fprintf(stderr, "Returning\n");
+
+	unsigned char *ptr = (unsigned char *) block;
+	ptr = ptr+ALIGNMENT;
+
+	return (void *) ptr;
 	
 
 	// if spot not found, place the block at the end, allocating
@@ -429,26 +488,33 @@ void *mm_malloc(size_t size)
 /*explicit free
  * mm_free - Freeing a block does nothing.
  */
-void mm_free(void *ptr)
-{
+void mm_free(void *ptr){
+
 	if (ptr == NULL){
-		fprintf(stderr, "Error : freeing a null ptr ");
+		fprintf(stderr, "Error mm_free : freeing a null ptr\n");
 		return;
 	}	
 
-	if(get_tag(ptr)){
-		fprintf(stderr, "freeing an already freed ptr");
+	unsigned char *head = (unsigned char *) ptr;
+	head = head-ALIGNMENT;
+	ptr = (void *) head;
+
+	if(!get_tag(ptr)){
+		fprintf(stderr, "Error mm_free : freeing an already freed ptr\n");
 		return;
 	}
 
 	// no distinction needed between start already not NULL and start NULL
 
-	set_tag(ptr, 0);
+	set_tag(ptr, (unsigned char)0);
+	if (get_tag(ptr)){
+		fprintf(stderr, "Unexpected tag\n");
+	}
 	set_next(ptr, start);
 	set_previous(start, ptr);
 	start = ptr;
 
-	merge_block(ptr);
+	merge_link(ptr);
 	
 	
 	//~check that the pointer really is one
@@ -482,14 +548,14 @@ void *mm_realloc(void *ptr, size_t size)
     size_t copySize;
     
 	if(get_tag(oldptr)){
-		fprintf(stderr, "Error : freeing already freed block");
+		fprintf(stderr, "Error mm_realloc : freeing already freed block\n");
 		return NULL;
 	}
 
     newptr = mm_malloc(size);
 
     if (newptr == NULL){
-		fprintf(stderr, "Error : malloc failed");
+		fprintf(stderr, "Error mm_realloc : malloc failed\n");
 		return NULL;
 	}
 
