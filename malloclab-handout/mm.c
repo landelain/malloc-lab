@@ -86,7 +86,7 @@ Use:
 // global variables
 
 static void* start;
-static int size4 = sizeof(size_t) == 4;
+//static int size4 = sizeof(size_t) == 4;
 
 
 
@@ -184,15 +184,8 @@ size_t get_size(void* current){
 	}
 
 	size_t * header = (size_t *) current;
-	size_t size = 0;
-	for (int i = 0; i < sizeof(size_t)-1; i++) {
-		// Shift the bytes and combine into size
-		size |= (size_t)header[i] << (sizeof(size_t) * i);
-	}
-	if(!size4){
-
-		size = size & (~(size_t)0xff);
-	}
+	size_t tmp = *header;
+	size_t size = tmp & ((size_t) (~1));
 
 	if ( size & 0x7 ){	
 
@@ -224,10 +217,11 @@ void set_next(void* current, void* next){
 		fprintf(stderr, "Error set_next : current not free block\n");
 		return;
 	}
-
-	if(get_tag(next)){
-		fprintf(stderr, "Error set_next : next not free block\n");
-		return;
+	if (!(next == NULL)){
+		if(get_tag(next)){
+			fprintf(stderr, "Error set_next : next not free block\n");
+			return;
+		}
 	}
 
 	unsigned char *header = (unsigned char *) current;
@@ -270,14 +264,17 @@ void set_size(void* current, size_t size){
 		return;
 	}
 
-	unsigned char *header = (unsigned char *) current;
+	size_t *header = (size_t *) current;
 
 	if (size & 0x7){	
 		fprintf(stderr, "Error set_size : size not a multiple of 8\n");
 		return;
 	}
 
+	unsigned char tag = get_tag(current);
 	header[0] = size;
+	set_tag(current, tag);
+
 	//size_t gsize = get_size(current);
 	//fprintf(stderr, "Setting size to %zu, should be %zu\n", header[0], size);
 
@@ -342,11 +339,12 @@ int merge_link(void* ptr){
 	while(current != NULL){
 
 		size_t sizec = get_size(current);
-		if(current + sizec == ptr){
+
+		if(( (unsigned char *) current) +8+ sizec == (unsigned char *) ptr){
 			//fprintf(stderr, "found pre");
 			pre = current;
 		}
-		if(ptr + size == current){
+		if(( (unsigned char *) ptr ) +8+ size == (unsigned char *) current){
 			//fprintf(stderr, "found post");
 			post = current;
 		}
@@ -399,6 +397,10 @@ int create_link(void* ptr, size_t size_new){
 	set_tag(link_ptr, 0);
 
 	set_next(link_ptr, start);
+	if (start == NULL){
+		fprintf(stderr, "Error create_link : start is null\n");
+		return 9;
+	}
 	set_previous(start, link_ptr);
 	start = link_ptr;
 
@@ -447,10 +449,10 @@ void *mm_malloc(size_t size)
 		}
 		//fprintf(stderr, "Calling set size 4\n");
 
-		fprintf(stderr, "before %zu\n", newsize);
+		//fprintf(stderr, "before %zu\n", newsize);
 		set_size(block, newsize);
-		size_t test = get_size(block);
-		fprintf(stderr, "after %zu\n\n", test);
+		//size_t test = get_size(block);
+		//fprintf(stderr, "after %zu\n\n", test);
 
 	}
 	else{
@@ -505,6 +507,7 @@ void mm_free(void *ptr){
 	unsigned char *head = (unsigned char *) ptr;
 	head = head-ALIGNMENT;
 	ptr = (void *) head;
+	
 
 	if(!get_tag(ptr)){
 		fprintf(stderr, "Error mm_free : freeing an already freed ptr\n");
@@ -518,6 +521,11 @@ void mm_free(void *ptr){
 		fprintf(stderr, "Unexpected tag\n");
 	}
 	set_next(ptr, start);
+
+	if (start == NULL){
+		fprintf(stderr, "Error mm_free : start is null\n");
+		return;
+	}
 	set_previous(start, ptr);
 	start = ptr;
 
@@ -553,7 +561,12 @@ void *mm_realloc(void *ptr, size_t size)
     void *oldptr = ptr;
     void *newptr;
     size_t copySize;
-    
+
+    if (oldptr == NULL){
+		fprintf(stderr, "Error mm_realloc : reallocating a null ptr\n");
+		return NULL;
+	}
+
 	if(get_tag(oldptr)){
 		fprintf(stderr, "Error mm_realloc : freeing already freed block\n");
 		return NULL;
